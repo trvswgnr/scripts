@@ -7,35 +7,40 @@
 
 DEFAULT_EXTENSIONS="php,js,ts,tsx,jsx,bash,sh,md,go,rs,ml,hs,rb,py,c,cpp,h,hpp,css,scss,html,xml,json,yaml,yml"
 
-get_combined_file() {
+# creates a single markdown string with the contents of all the files in the project and prints it to the console
+get_combined() {
     local extensions="$1"
     local ignore_case="$2"
+    local include_no_ext="$3"
 
-    IFS=',' read -ra ext_array <<<"$extensions"
     IFS=',' read -ra ext_array <<<"$extensions"
 
     # construct a single regex for all extensions
     local regex
     regex=$(
         IFS='|'
-        echo "${ext_array[*]}"
+        printf "%s" "${ext_array[*]}"
     )
 
+    local no_ext_regex=""
+    if [ -n "$include_no_ext" ]; then
+        no_ext_regex="|(^[^.]+$)"
+    fi
+
     # use a single find command with -regex
-    git ls-files | grep $ignore_case -E "\\.(${regex})$" |
+    git ls-files | grep $ignore_case -E "(\\.(${regex})$)$no_ext_regex" |
         while IFS= read -r file; do
             extension="${file##*.}"
-            echo "$file:"
-            echo "\`\`\`$extension"
-            cat "$file"
-            echo -e "\n\`\`\`\n"
+            contents=$(cat "$file")
+            # printf "%s\n" "$file"
+            printf "%s:\n\`\`\`%s\n%s\n\`\`\`\n\n" "$file" "$extension" "$contents"
         done
 }
 
 # check for required commands
 check_command() {
     if ! command -v "$1" &>/dev/null; then
-        echo "Error: $1 is required but not installed. Please install it and try again." >&2
+        printf "Error: %s is required but not installed. Please install it and try again.\n" "$1" >&2
         exit 1
     fi
 }
@@ -46,6 +51,8 @@ main() {
 
     local extensions=""
     local ignore_case=""
+    local print_tree=false
+    local include_no_ext=""
 
     while [[ $# -gt 0 ]]; do
         case "$1" in
@@ -54,43 +61,58 @@ main() {
             shift
             ;;
         -x | --extensions=*)
-            extensions="${1#*=}"
+            # if it's `-x` then it should be like `-x php,js,ts`
+            if [[ "$1" == "-x" ]]; then
+                extensions="${2#*=}"
+                shift 2
+            else
+                extensions="${1#*=}"
+                shift
+            fi
+            ;;
+        -t | --tree)
+            print_tree=true
+            shift
+            ;;
+        -d | --defaults)
+            extensions="$DEFAULT_EXTENSIONS"
+            print_tree=true
+            shift
+            ;;
+        -n | --no-ext)
+            include_no_ext="true"
             shift
             ;;
         -h | --help)
-            echo "Usage: $0 [options]"
-            echo "Options:"
-            echo "  -i, --ignore-case    Ignore case when matching file extensions"
-            echo "  -x, --extensions     Specify file extensions to include (comma-separated)"
-            echo "  -h, --help           Show this help message and exit"
-            echo ""
-            echo "Example: $0 -i -x=php,js,ts"
+            printf "Usage: %s [options]\n" "$0"
+            printf "Options:\n"
+            printf "  -i, --ignore-case    Ignore case when matching file extensions\n"
+            printf "  -x, --extensions     Specify file extensions to include (comma-separated)\n"
+            printf "  -t, --tree           Print the project tree\n"
+            printf "  -h, --help           Show this help message and exit\n\n"
+            printf "  -d, --defaults       Use the default settings\n"
+            printf "  -n, --no-ext         Include files without extensions\n"
+            printf "Example: %s -i -x=php,js,ts\n" "$0"
             exit 0
             ;;
         *)
-            echo "Unknown option: $1" >&2
+            printf "Unknown option: %s\n" "$1" >&2
             exit 1
             ;;
         esac
     done
 
-    if [ -z "$extensions" ]; then
-        # confirm with the user that they want to use the default extensions
-        read -r -p "Do you want to use the default extensions? (Y/n): " use_default
-        use_default=${use_default:-Y} # set default to Y if user just presses Enter
-        if [[ $use_default =~ ^[Nn]$ ]]; then
-            read -r -p "Enter the extensions to include (comma-separated): " extensions
-            echo "Using extensions: $extensions"
-        else
-            echo "Using default extensions"
-            extensions="$DEFAULT_EXTENSIONS"
-        fi
+    if [ -z "$extensions" ] && [ -z "$include_no_ext" ]; then
+        printf "ERROR: Extensions cannot be empty. Did you mean to pass the \`-n\` flag to include files without extensions?\n" >&2
+        exit 1
     fi
 
-    echo "Project: "
-    tree --gitignore --dirsfirst
-    echo
-    get_combined_file "$extensions" "$ignore_case"
+    if $print_tree; then
+        filetree=$(tree --gitignore --dirsfirst)
+        printf "%s\n\n" "$filetree"
+    fi
+
+    get_combined "$extensions" "$ignore_case" "$include_no_ext"
 }
 
 main "$@"
