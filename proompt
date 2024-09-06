@@ -33,7 +33,8 @@ print_tree_helper() {
 
     for i in "${!entries[@]}"; do
         local entry="${entries[$i]}"
-        local entry_name=$(basename "$entry")
+        local entry_name
+        entry_name=$(basename "$entry")
 
         if [ -d "$entry" ]; then
             entry_name="${entry_name}/"
