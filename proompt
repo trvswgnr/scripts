@@ -5,6 +5,7 @@
 # this script is used to craft a prompt for AI to use with the combined files of
 # a project.
 
+CMD=$(basename "$0")
 DEFAULT_EXTENSIONS="php,js,ts,tsx,jsx,bash,sh,md,go,rs,ml,hs,rb,py,c,cpp,h,hpp,css,scss,html,xml,json,yaml,yml"
 
 # creates a single markdown string with the contents of all the files in the project and prints it to the console
@@ -56,43 +57,65 @@ main() {
 
     while [[ $# -gt 0 ]]; do
         case "$1" in
-        -i | --ignore-case)
+        -[ixdnt]*)
+            flags=${1#-}
+            shift
+            for (( i=0; i<${#flags}; i++ )); do
+                case "${flags:$i:1}" in
+                    i) ignore_case="-iregex" ;;
+                    x) 
+                        if [[ -n "$2" && "$2" != -* ]]; then
+                            extensions="$2"
+                            shift
+                        else
+                            printf "Error: -x flag requires an argument.\n" >&2
+                            exit 1
+                        fi
+                        ;;
+                    d) 
+                        extensions="$DEFAULT_EXTENSIONS"
+                        print_tree=true
+                        ;;
+                    n) include_no_ext="true" ;;
+                    t) print_tree=true ;;
+                    *) 
+                        printf "Unknown option: -%s\n" "${flags:$i:1}" >&2
+                        exit 1
+                        ;;
+                esac
+            done
+            ;;
+        --ignore-case)
             ignore_case="-iregex"
             shift
             ;;
-        -x | --extensions=*)
-            # if it's `-x` then it should be like `-x php,js,ts`
-            if [[ "$1" == "-x" ]]; then
-                extensions="${2#*=}"
-                shift 2
-            else
-                extensions="${1#*=}"
-                shift
-            fi
+        --extensions=*)
+            extensions="${1#*=}"
+            shift
             ;;
-        -t | --tree)
+        --tree)
             print_tree=true
             shift
             ;;
-        -d | --defaults)
+        --defaults)
             extensions="$DEFAULT_EXTENSIONS"
             print_tree=true
             shift
             ;;
-        -n | --no-ext)
+        --no-ext)
             include_no_ext="true"
             shift
             ;;
-        -h | --help)
-            printf "Usage: %s [options]\n" "$0"
+        -h|--help)
+            printf "Usage: %s [options]\n" "$CMD"
             printf "Options:\n"
             printf "  -i, --ignore-case    Ignore case when matching file extensions\n"
             printf "  -x, --extensions     Specify file extensions to include (comma-separated)\n"
             printf "  -t, --tree           Print the project tree\n"
-            printf "  -h, --help           Show this help message and exit\n\n"
             printf "  -d, --defaults       Use the default settings\n"
             printf "  -n, --no-ext         Include files without extensions\n"
-            printf "Example: %s -i -x=php,js,ts\n" "$0"
+            printf "  -h, --help           Show this help message and exit\n\n"
+            printf "Example: %s -ix php,js,ts\n" "$CMD"
             exit 0
             ;;
         *)
