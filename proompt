@@ -2,132 +2,95 @@
 
 # proompt
 #
-# This script is used to craft a prompt for AI to use with the combined files of
+# this script is used to craft a prompt for AI to use with the combined files of
 # a project.
 
-# Default extensions
 DEFAULT_EXTENSIONS="php,js,ts,tsx,jsx,bash,sh,md,go,rs,ml,hs,rb,py,c,cpp,h,hpp,css,scss,html,xml,json,yaml,yml"
 
-is_ignored() {
-    local path="$1"
-    # Explicitly exclude .git and other VCS folders
-    case "$(basename "$path")" in
-    .git | .svn | .hg | .bzr | CVS) return 0 ;;
-    esac
-    git check-ignore -q "$path"
-    return $?
+get_combined_file() {
+    local extensions="$1"
+    local ignore_case="$2"
+
+    IFS=',' read -ra ext_array <<<"$extensions"
+    IFS=',' read -ra ext_array <<<"$extensions"
+
+    # construct a single regex for all extensions
+    local regex
+    regex=$(
+        IFS='|'
+        echo "${ext_array[*]}"
+    )
+
+    # use a single find command with -regex
+    git ls-files | grep $ignore_case -E "\\.(${regex})$" |
+        while IFS= read -r file; do
+            extension="${file##*.}"
+            echo "$file:"
+            echo "\`\`\`$extension"
+            cat "$file"
+            echo -e "\n\`\`\`\n"
+        done
 }
 
-print_tree_helper() {
-    local prefix="$1"
-    local path="$2"
-    local entries=()
-
-    while IFS= read -r -d $'\0' entry; do
-        if ! is_ignored "$entry"; then
-            entries+=("$entry")
-        fi
-    done < <(find "$path" -mindepth 1 -maxdepth 1 -print0 | sort -z)
-
-    local last_index=$((${#entries[@]} - 1))
-
-    for i in "${!entries[@]}"; do
-        local entry="${entries[$i]}"
-        local entry_name
-        entry_name=$(basename "$entry")
-
-        if [ -d "$entry" ]; then
-            entry_name="${entry_name}/"
-        fi
-
-        if [ "$i" -eq "$last_index" ]; then
-            echo "${prefix}└── ${entry_name}"
-            if [ -d "$entry" ]; then
-                print_tree_helper "${prefix}    " "$entry"
-            fi
-        else
-            echo "${prefix}├── ${entry_name}"
-            if [ -d "$entry" ]; then
-                print_tree_helper "${prefix}│   " "$entry"
-            fi
-        fi
-    done
-}
-
-print_tree() {
-    # Check if we're in a git repository
-    if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-        echo "Error: Not in a git repository"
+# check for required commands
+check_command() {
+    if ! command -v "$1" &>/dev/null; then
+        echo "Error: $1 is required but not installed. Please install it and try again." >&2
         exit 1
     fi
-
-    # Print the root directory
-    echo "$(basename "$PWD")/"
-    print_tree_helper "" "$PWD"
 }
 
-get_combined_file() {
-    local case_sensitive=true
-    local extensions="$DEFAULT_EXTENSIONS"
+main() {
+    check_command git
+    check_command tree
 
-    # Parse arguments
+    local extensions=""
+    local ignore_case=""
+
     while [[ $# -gt 0 ]]; do
         case "$1" in
-            -i|--ignore-case)
-                case_sensitive=false
-                shift
-                ;;
-            -x|--extensions=*)
-                if [[ "$1" == --extensions=* ]]; then
-                    extensions="${1#*=}"
-                else
-                    extensions="$2"
-                    shift
-                fi
-                shift
-                ;;
-            *)
-                echo "Unknown option: $1" >&2
-                exit 1
-                ;;
+        -i | --ignore-case)
+            ignore_case="-iregex"
+            shift
+            ;;
+        -x | --extensions=*)
+            extensions="${1#*=}"
+            shift
+            ;;
+        -h | --help)
+            echo "Usage: $0 [options]"
+            echo "Options:"
+            echo "  -i, --ignore-case    Ignore case when matching file extensions"
+            echo "  -x, --extensions     Specify file extensions to include (comma-separated)"
+            echo "  -h, --help           Show this help message and exit"
+            echo ""
+            echo "Example: $0 -i -x=php,js,ts"
+            exit 0
+            ;;
+        *)
+            echo "Unknown option: $1" >&2
+            exit 1
+            ;;
         esac
     done
 
-    echo "Extensions: $extensions"
-    echo "Case sensitive: $case_sensitive"
-
-    local combined=""
-    IFS=',' read -ra ext_array <<< "$extensions"
-    
-    for extension in "${ext_array[@]}"; do
-        local find_args=()
-        if [ "$case_sensitive" = false ]; then
-            find_args+=(-iname)
+    if [ -z "$extensions" ]; then
+        # confirm with the user that they want to use the default extensions
+        read -r -p "Do you want to use the default extensions? (Y/n): " use_default
+        use_default=${use_default:-Y} # set default to Y if user just presses Enter
+        if [[ $use_default =~ ^[Nn]$ ]]; then
+            read -r -p "Enter the extensions to include (comma-separated): " extensions
+            echo "Using extensions: $extensions"
         else
-            find_args+=(-name)
+            echo "Using default extensions"
+            extensions="$DEFAULT_EXTENSIONS"
         fi
-        find_args+=("*.${extension}")
+    fi
 
-        while IFS= read -r -d '' file; do
-            if ! is_ignored "$file"; then
-                combined+="$file"
-                combined+=$':\n```'
-                combined+="${extension}"
-                combined+=$'\n'
-                combined+=$(cat "$file")
-                combined+=$'\n\n```\n\n'
-            fi
-        done < <(find . "${find_args[@]}" -print0 | sort -z)
-    done
-    echo "$combined"
+    echo "Project: "
+    tree --gitignore --dirsfirst
+    echo
+    get_combined_file "$extensions" "$ignore_case"
 }
 
-craft_prompt() {
-    echo $'Project structure: \n'
-    print_tree
-    echo $'\n'
-    echo $'Project files: \n'
-    get_combined_file "$@"
-}
-
-craft_prompt "$@"
+main "$@"
