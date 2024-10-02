@@ -3,7 +3,6 @@
 Thumbs.db
 
 # Editor/IDE specific files
-.vscode/
 .idea/
 *.swp
 *.swo
